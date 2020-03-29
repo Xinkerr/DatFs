@@ -21,7 +21,7 @@
 * see: http://www.gnu.org/licenses/lgpl-3.0.html
 *
 * Date:    2020/3/29
-* Author:  ���M
+* Author:  郑訫
 * Version: 1.0
 * Github:  https://github.com/Xinkerr/DatFs
 * Mail:    634326056@qq.com
@@ -54,8 +54,8 @@
 
 
 /*************************************************************
- �������ݱ���������ʶ�� 
- | �ռ�����   | ��Ԫ��С       | ָ���������ݱ���λ�� |  DATA
+ 扇区数据保存引导标识： 
+ | 空间命名   | 单元大小       | 指向最新数据保存位置 |  DATA
  | sector_addr| unit_size_byte |  unit_addr           |  data_addr
 *************************************************************/
 
@@ -74,9 +74,13 @@ static void DatFs_head_write(datfs32_obj_t* datfs_obj)
 	// DATFS_FLASH_WRITE(datfs_obj->unit_info_addr, (uint8_t*)&datfs_obj->unit_size_byte, sizeof(datfs_obj->unit_size_byte));
 }
 
-/**@brief  ��ʼ��
+/**@brief  初始化
  *
- * @param[in] datfs_obj�� �ṹ���������
+ * @param[in] datfs_obj： 结构体参数传入
+ * 
+ * return 			0:成功
+ * 				   -1:name过长
+ * 				   -2：unit_size_byte没有4字节对齐
  */
 int DatFs32_sector_init(datfs32_obj_t* datfs_obj)
 {
@@ -86,29 +90,29 @@ int DatFs32_sector_init(datfs32_obj_t* datfs_obj)
 
 	if(datfs_obj->name_len > DATFS_HEAD_LEN-4)
 		return -1;
-	if(datfs_obj->unit_size_byte & 3)	//��4������
+	if(datfs_obj->unit_size_byte & 3)	//4的余数
 		return -2;
-//	printf("----\r\n");
-	//��ȡflash��head, head����name��unit size
+
+	//读取flash内head, head包含name和unit size
 	DATFS32_FLASH_READ(datfs_obj->sector_addr, (void*)read_buf, DATFS_HEAD_LEN >> 2);
 	memcpy(&unit_size, &read_buf[DATFS_HEAD_LEN-4], 4);
 
-	//���unit_point��flash��ַ
+	//存放unit_point的flash地址
 	datfs_obj->unit_point_addr = datfs_obj->sector_addr + DATFS_HEAD_LEN;
 	tmp_max = (datfs_obj->sector_size - DATFS_HEAD_LEN) / datfs_obj->unit_size_byte;
-	//unit point��ռ�õĿռ��ֽ�
+	//unit point所占用的空间字节
 	datfs_obj->unit_point_space = tmp_max / 8 + 1;
-	//4�ֽڲ���
+	//4字节对齐
 	rem = datfs_obj->unit_point_space & 3;
 	if(rem)			
 		datfs_obj->unit_point_space =  datfs_obj->unit_point_space + 4 - rem;
 			
-	//���������������Ԫ��
+	//该扇区可容纳最大单元数
 	datfs_obj->unit_max = (datfs_obj->sector_size -DATFS_HEAD_LEN - datfs_obj->unit_point_space) / datfs_obj->unit_size_byte;
-	//��Ч���ݵ���ʼ��ַ
+	//有效数据的起始地址
 	datfs_obj->payload_addr = datfs_obj->unit_point_addr + datfs_obj->unit_point_space;
-	//��ʽ��֤ 
-	//�ṹ���name�Ƿ���flash��ȡ��name��ͬ����ͬ���������д�� ���ٿռ�		
+	//格式验证 
+	//结构体的name是否与flash读取的name相同，不同则擦除重新写入 开辟空间			
 	if(memcmp(read_buf, datfs_obj->name, datfs_obj->name_len) == 0 &&
 	   unit_size == datfs_obj->unit_size_byte)
 	{
@@ -122,7 +126,7 @@ int DatFs32_sector_init(datfs32_obj_t* datfs_obj)
 
 		printf("name write\r\n");
 	}
-	//�������ǰ�������ݵĵ�Ԫλ��
+	//计算出当前最新数据的单元位置
 	if(datfs_obj->unit_point == 0)
 		datfs_obj->current_addr = datfs_obj->payload_addr;
 	else
@@ -131,28 +135,31 @@ int DatFs32_sector_init(datfs32_obj_t* datfs_obj)
 	return 0;
 }
 
-/**@brief  д������
+/**@brief  写入数据
  *
- * @param[in] datfs_obj������ṹ��
- * @param[in] pdata  ��  �������ݵ�ָ��
- * @param[in] length  �� д�����ݳ���
+ * @param[in] datfs_obj：对象结构体
+ * @param[in] pdata  ：  传入数据的指针
+ * @param[in] length  ： 写入数据长度
+ * 
+ * @return 			0：成功
+ * 				   -1: 长度过大
+ * 				   -2: 没有4字节对齐
  */
-#if 1
 int DatFs32_write(datfs32_obj_t* datfs_obj, uint8_t* pdata, uint16_t length)
 {
 	uint16_t len;
-	//���ݳ��Ȳ��ܴ��ڵ�Ԫ��С
+	//数据长度不能大于单元大小
 	if(length > datfs_obj->unit_size_byte)
 		return -1;
 
-	//4�ֽڶ���
-	if(length & 3)						//4����������0ʱ
+	//4字节对齐
+	if(length & 3)						//4的余数
 		return -2;
 	else
 		len = length >> 2;
 	
 		
-	//��Ԫλ�ôﵽ��󣬼�д������ʱ��������ͷ��ʼд��
+	//单元位置达到最大，即写满扇区时，擦除从头开始写入
 	if(datfs_obj->unit_point >= datfs_obj->unit_max)
 	{
 		DatFs_head_write(datfs_obj);
@@ -160,7 +167,7 @@ int DatFs32_write(datfs32_obj_t* datfs_obj, uint8_t* pdata, uint16_t length)
 		datfs_obj->current_addr = datfs_obj->payload_addr;
 		datfs_obj->unit_point = 0;
 	}
-	//д������ ��ǰָ���ַ�ۼ�
+	//写入数据 当前指向地址累加
 	if(datfs_obj->unit_point == 0)
 	{
 		DATFS32_FLASH_WRITE(datfs_obj->payload_addr, (void*)pdata, len);
@@ -171,31 +178,31 @@ int DatFs32_write(datfs32_obj_t* datfs_obj, uint8_t* pdata, uint16_t length)
 		datfs_obj->current_addr = datfs_obj->current_addr + datfs_obj->unit_size_byte;
 		DATFS32_FLASH_WRITE(datfs_obj->current_addr, (void*)pdata, len);
 	}		
-	//��Ԫλ�ú��� ��д��flash��
+	//单元位置后移 并写入flash中
 	datfs_obj->unit_point ++;
 	unit_point_write(datfs_obj);
 	return 0;
 }
-#endif
 
-/**@brief  ����
+/**@brief  读出
  *
- * @param[in] datfs_obj������ṹ��
- * @param[in] pdata  ��  �������������ĵ�ַ
- * @param[in] length  �� ���������ݳ���
+ * @param[in] datfs_obj：对象结构体
+ * @param[in] pdata  ：  读出到缓冲区的地址
+ * @param[in] length  ： 读出的数据长度
  *
- * @return    -1��ʧ��
- *			   		0�� �ɹ�
+ * @return 			0：成功
+ * 				   -1: 长度过大
+ * 				   -2: 没有4字节对齐
  */
 int DatFs32_read(datfs32_obj_t* datfs_obj, uint8_t* pdata, uint16_t length)
 {
 	uint16_t len;
-	//ǰ�� �����ݣ���ȡ���Ȳ��ܴ��ڵ�Ԫ��С
+	//前提 有数据；读取长度不能大于单元大小
 	if(length > datfs_obj->unit_max || datfs_obj->unit_point == 0)
 		return -1;
 
-	//����4�ֽڶ���
-	if(length & 3)						//4����������0ʱ
+	//读出4字节对齐
+	if(length & 3)						//4的余数
 		return -2;
 	else
 		len = length >> 2;
@@ -205,12 +212,12 @@ int DatFs32_read(datfs32_obj_t* datfs_obj, uint8_t* pdata, uint16_t length)
 	return 0;
 }
 
-/**@brief  д�뵱ǰ��Ԫ��Чλ��
+/**@brief  写入当前单元有效位置
  *
- * @param[in] datfs_obj������ṹ��
+ * @param[in] datfs_obj：对象结构体
  *
- * @return    -1��ʧ��
- *			   		0�� �ɹ�
+ * @return    		-1：失败
+ *			   		0： 成功
  */
 int unit_point_write(datfs32_obj_t* datfs_obj)
 {
@@ -219,20 +226,20 @@ int unit_point_write(datfs32_obj_t* datfs_obj)
 	uint32_t mask = 0xffffffff;
 //	uint16_t tmp_byte = datfs_obj->unit_point / 32;
 //	uint16_t tmp_bit = datfs_obj->unit_point % 32;
-	tmp_byte = datfs_obj->unit_point >> 5;	//����
-	tmp_bit = datfs_obj->unit_point & 31;  	//���� 
+	tmp_byte = datfs_obj->unit_point >> 5;	//整除
+	tmp_bit = datfs_obj->unit_point & 31;  	//求余
 	
 	
 	if(tmp_byte == 0 && tmp_bit == 0)
 		return -1;
 
-	//������ֵ �ӵ�λ��ʼ��0	
+	//根据数值 从低位开始置0	
 	if(tmp_bit == 0)
 		unit_byte = 0x00;
 	else
 		unit_byte = mask << tmp_bit;
 
-	//д�뵱ǰ���µĵ�Ԫλ��
+	//写入当前最新的单元位置
 	if(tmp_bit == 0)
 		DATFS32_FLASH_WRITE(datfs_obj->unit_point_addr + tmp_byte - 1, (void*)&unit_byte, 1);
 	else
@@ -240,12 +247,12 @@ int unit_point_write(datfs32_obj_t* datfs_obj)
 	return 0;
 }
 
-/**@brief  ������ǰ��Ԫ��Чλ��
+/**@brief  读出当前单元有效位置
  *
- * @param[in] datfs_obj������ṹ��
+ * @param[in] datfs_obj：对象结构体
  *
- * @return    -1��ʧ��
- *			   		0�� �ɹ�
+ * @return    		-1：失败
+ *			   		0： 成功
  */
 int unit_point_read(datfs32_obj_t* datfs_obj)
 {
@@ -254,7 +261,7 @@ int unit_point_read(datfs32_obj_t* datfs_obj)
 	uint16_t cnt = 0;
 	int i,j;
 	j = datfs_obj->unit_point_space >> 2;
-	//��flash��unit point���ҳ���Ϊ0��λ�ú���ֵ
+	//从flash的unit point查找出不为0的位置和数值
 	for(i = 0; i < j; i++)
 	{
 		DATFS32_FLASH_READ(datfs_obj->unit_point_addr+i, (void*)&tmp, 1);
@@ -271,7 +278,7 @@ int unit_point_read(datfs32_obj_t* datfs_obj)
 		conver_val = 0;	
 	else
 	{
-		//���ݶ�����0��λ���ж� ��ǰunit ponit��������ֵ��ָ���λ��
+		//根据二进制0的位置判断 当前unit ponit代表的数值和指向的位置
 		for(i = 0; i < sizeof(tmp); i++)
 		{
 			if(tmp & 0x01 == 0)

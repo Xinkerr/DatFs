@@ -21,7 +21,7 @@
 * see: http://www.gnu.org/licenses/lgpl-3.0.html
 *
 * Date:    2020/3/29
-* Author:  ���M
+* Author:  郑訫
 * Version: 1.0
 * Github:  https://github.com/Xinkerr/DatFs
 * Mail:    634326056@qq.com
@@ -51,7 +51,7 @@
 #define __DATFS_H__
 #include <stdint.h>
 
-//���϶�Ӧ���� 
+//根据宏填入对应的函数
 #include "exflash32.h"
 #define DATFS32_FLASH_SECTOR_ERASE(ADDR)							exflash_sector_erase32(ADDR)
 #define DATFS32_FLASH_WRITE(ADDR, PDATA, LEN)						exflash_write32(ADDR, PDATA, LEN)
@@ -59,8 +59,8 @@
 
 #define DATFS_HEAD_LEN				16
 
-//��Ԫ��С���ñ������4�ֽڶ��룻
-//д��Ͷ��������ݳ���Ҳ�������4�ֽڶ���
+//单元大小必须4字节对齐
+//写入和读出长度也必须4字节对齐
  
 typedef struct
 {
@@ -69,42 +69,51 @@ typedef struct
 	uint16_t name_len;
 	uint32_t sector_addr;
 	uint16_t sector_size;
-	uint32_t unit_size_byte;		//д����������ֽڷ�Χ����Ϊ���ݵ�Ԫ�����Ĵ�С
+	uint32_t unit_size_byte;		//写入数据最大字节范围，作为数据单元分区的大小
 	
 	//---------only read-------------
 	//address 
-	// uint32_t unit_info_addr;		//��ŵ�Ԫ��С��Ϣ�ĵ�ַ 
-	uint32_t unit_point_addr;		//��ŵ�ǰָ���������ݵĵ�Ԫ 
-	uint32_t payload_addr;			//�����Ч���ݵ�����Ŀ�ʼ��ַ 
-	uint32_t current_addr;			//��ǰ�������ݴ�ŵĵ�ַ 
+	// uint32_t unit_info_addr;		//存放单元大小信息的地址 
+	uint32_t unit_point_addr;		//存放当前指向最新数据的单元 
+	uint32_t payload_addr;			//存放有效数据的区域的开始地址 
+	uint32_t current_addr;			//当前最新数据存放的地址 
 	//unit
 	uint16_t unit_point;
 	uint16_t unit_max;	
 	uint16_t unit_point_space;
 }datfs32_obj_t;
 
-/**@brief  ��ʼ��
+/**@brief  初始化
  *
- * @param[in] datfs_obj�� �ṹ���������
+ * @param[in] datfs_obj： 结构体参数传入
+ * 
+ * return 			0:成功
+ * 				   -1:name过长
+ * 				   -2：unit_size_byte没有4字节对齐
  */
 int DatFs32_sector_init(datfs32_obj_t* datfs_obj);
 
-/**@brief  д������
+/**@brief  写入数据
  *
- * @param[in] datfs_obj������ṹ��
- * @param[in] pdata  ��  �������ݵ�ָ��
- * @param[in] length  �� д�����ݳ���
+ * @param[in] datfs_obj：对象结构体
+ * @param[in] pdata  ：  传入数据的指针
+ * @param[in] length  ： 写入数据长度
+ * 
+ * @return 			0：成功
+ * 				   -1: 长度过大
+ * 				   -2: 没有4字节对齐
  */
 int DatFs32_write(datfs32_obj_t* datfs_obj, uint8_t* pdata, uint16_t length);
 
-/**@brief  ����
+/**@brief  读出
  *
- * @param[in] datfs_obj������ṹ��
- * @param[in] pdata  ��  �������������ĵ�ַ
- * @param[in] length  �� ���������ݳ���
+ * @param[in] datfs_obj：对象结构体
+ * @param[in] pdata  ：  读出到缓冲区的地址
+ * @param[in] length  ： 读出的数据长度
  *
- * @return    -1��ʧ��
- *			   		0�� �ɹ�
+ * @return 			0：成功
+ * 				   -1: 长度过大
+ * 				   -2: 没有4字节对齐
  */
 int DatFs32_read(datfs32_obj_t* datfs_obj, uint8_t* pdata, uint16_t length);
 
